@@ -113,8 +113,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-    from pykrx import stock
-    df = stock.get_market_ohlcv_by_date(fromdate='20200101',todate='20251217',ticker='005930')
-    df = df[['시가','저가','고가','종가']]
-    df.to_excel("D:/price005930.xlsx")
