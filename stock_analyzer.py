@@ -81,7 +81,8 @@ def get_clean_app_id():
     try:
         val = st.secrets.get("app_id")
         if val and str(val).strip():
-            return str(val).strip()
+            # 슬래시 제거 (경로 오류 방지)
+            return str(val).strip().replace("/", "")
     except:
         pass
     return "stock_analyzer"
@@ -133,25 +134,27 @@ def format_date_korean(date_val):
         return dt.strftime("%Y년 %m월 %d일") if not pd.isna(dt) else str(date_val)
     except: return str(date_val)
 
-# --- 클라우드 저장 및 로드 (경로 명시적 구성) ---
+# --- 클라우드 저장 및 로드 (경로 검증 강화) ---
 def save_to_cloud(payload):
     if not db: 
         st.error("데이터베이스 연결 설정이 필요합니다.")
         return
     
-    # App ID 최종 검증 및 경로 생성
+    # 1. App ID 최종 검증
     safe_app_id = str(app_id).strip()
-    if not safe_app_id: safe_app_id = "stock_analyzer"
+    if not safe_app_id: 
+        safe_app_id = "stock_analyzer"
     
-    # 경로를 명시적 문자열로 생성하여 컴포넌트 에러 방지
+    # 2. 경로 문자열 생성 (명시적)
     doc_path = f"artifacts/{safe_app_id}/public/data/dashboard/latest"
-
+    
     try:
+        # 단일 document() 호출로 경로 모호성 제거
         doc_ref = db.document(doc_path)
         doc_ref.set(payload)
-        st.success(f"☁️ 클라우드 저장 완료! (경로: {doc_path})")
+        st.success(f"☁️ 클라우드 저장 완료! (ID: {safe_app_id})")
     except Exception as e:
-        st.error(f"저장 실패. (시도 경로: {doc_path})\n에러 상세: {e}")
+        st.error(f"저장 실패.\n경로: {doc_path}\n에러: {e}")
 
 def load_from_cloud():
     if not db: return None
