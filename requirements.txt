@@ -1,4 +1,5 @@
-streamlit
+google-cloud-firestore
 pandas
 plotly
+numpy
 openpyxl
