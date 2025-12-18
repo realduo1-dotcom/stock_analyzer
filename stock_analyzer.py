@@ -133,42 +133,25 @@ def format_date_korean(date_val):
         return dt.strftime("%Y년 %m월 %d일") if not pd.isna(dt) else str(date_val)
     except: return str(date_val)
 
-# --- 클라우드 저장 및 로드 (경로 검증 강화) ---
+# --- 클라우드 저장 및 로드 (경로 명시적 구성) ---
 def save_to_cloud(payload):
     if not db: 
         st.error("데이터베이스 연결 설정이 필요합니다.")
         return
     
-    # 1. App ID 최종 검증
+    # App ID 최종 검증 및 경로 생성
     safe_app_id = str(app_id).strip()
-    if not safe_app_id: 
-        safe_app_id = "stock_analyzer"
+    if not safe_app_id: safe_app_id = "stock_analyzer"
     
-    # 2. 경로 구성 요소 확인
-    path_components = {
-        "collection1": "artifacts",
-        "doc1": safe_app_id,
-        "collection2": "public",
-        "doc2": "data",
-        "collection3": "dashboard",
-        "doc3": "latest"
-    }
-    
-    # 빈 컴포넌트가 있는지 확인
-    for k, v in path_components.items():
-        if not v or not str(v).strip():
-            st.error(f"저장 경로 생성 실패: '{k}' 요소가 비어있습니다. (값: {v})")
-            return
+    # 경로를 명시적 문자열로 생성하여 컴포넌트 에러 방지
+    doc_path = f"artifacts/{safe_app_id}/public/data/dashboard/latest"
 
     try:
-        # artifacts/{appId}/public/data/dashboard/latest
-        doc_ref = db.collection("artifacts").document(safe_app_id)\
-                    .collection("public").document("data")\
-                    .collection("dashboard").document("latest")
+        doc_ref = db.document(doc_path)
         doc_ref.set(payload)
-        st.success(f"☁️ 클라우드 저장 완료! (ID: {safe_app_id})")
+        st.success(f"☁️ 클라우드 저장 완료! (경로: {doc_path})")
     except Exception as e:
-        st.error(f"저장 중 오류가 발생했습니다: {e}")
+        st.error(f"저장 실패. (시도 경로: {doc_path})\n에러 상세: {e}")
 
 def load_from_cloud():
     if not db: return None
@@ -176,9 +159,9 @@ def load_from_cloud():
         safe_app_id = str(app_id).strip()
         if not safe_app_id: safe_app_id = "stock_analyzer"
         
-        doc_ref = db.collection("artifacts").document(safe_app_id)\
-                    .collection("public").document("data")\
-                    .collection("dashboard").document("latest")
+        doc_path = f"artifacts/{safe_app_id}/public/data/dashboard/latest"
+        doc_ref = db.document(doc_path)
+        
         doc = doc_ref.get()
         return doc.to_dict() if doc.exists else None
     except: return None
