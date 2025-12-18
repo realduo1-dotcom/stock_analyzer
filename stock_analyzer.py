@@ -77,7 +77,6 @@ st.markdown("""
 
 # --- Firebase / Firestore 설정 (Secrets 대응) ---
 def get_clean_app_id():
-    # Secrets에 설정된 "stock_analyzer" 가져오기
     val = st.secrets.get("app_id", "stock_analyzer")
     return str(val).strip() if val else "stock_analyzer"
 
@@ -94,7 +93,6 @@ def get_db():
         else:
             config_dict = dict(firebase_config_raw)
         
-        # private_key 내의 \n 문자 처리
         if 'private_key' in config_dict:
             config_dict['private_key'] = config_dict['private_key'].replace('\\n', '\n')
             
@@ -128,19 +126,17 @@ def format_date_korean(date_val):
         return dt.strftime("%Y년 %m월 %d일") if not pd.isna(dt) else str(date_val)
     except: return str(date_val)
 
-# --- 클라우드 저장 및 로드 (에러 해결 핵심 로직) ---
+# --- 클라우드 저장 및 로드 ---
 def save_to_cloud(payload):
     if not db: 
         st.error("데이터베이스 연결 설정이 필요합니다.")
         return
     try:
-        # 경로 구성 요소 강제 문자열화 및 검증
         safe_app_id = str(app_id).strip()
         if not safe_app_id: 
             st.error("app_id가 비어있습니다.")
             return
             
-        # artifacts(coll) -> appId(doc) -> public(coll) -> data(doc) -> dashboard(coll) -> latest(doc)
         doc_ref = db.collection("artifacts").document(safe_app_id)\
                     .collection("public").document("data")\
                     .collection("dashboard").document("latest")
@@ -179,10 +175,8 @@ def get_mock_data():
 
 # --- 메인 앱 뷰 ---
 def main():
-    # 1. 상단 헤더
     h_col1, h_col2 = st.columns([0.7, 0.3])
     
-    # 데이터 로드
     cloud_data = load_from_cloud()
     p_mock, c_mock, b_mock = get_mock_data()
     
@@ -292,7 +286,7 @@ def main():
         with c2: st.success(f"**🎯 투자 포인트**\n\n{cur_basic['투자포인트']}")
 
     with tabs[1]:
-        if isinstance(cur_price, pd.DataFrame) and not cur_price.empty:
+        if isinstance(cur_price, pd.DataFrame) and not current_price.empty:
             d_col = find_column(cur_price, ['Date', '일자', '날짜'])
             p_col = find_column(cur_price, ['Price', '종가'])
             b_col = find_column(cur_price, ['Benchmark', '벤치마크'])
@@ -336,7 +330,7 @@ def main():
     with tabs[3]:
         if isinstance(cur_issues, pd.DataFrame) and not cur_issues.empty:
             stocks = cur_issues[cur_issues.columns[1]].unique()
-            sel = st.selectbox("종목 선택", stocks)
+            sel = st.selectbox("종목 선택", stocks, key="issue_stock_sel")
             f_is = cur_issues[cur_issues[cur_issues.columns[1]] == sel]
             for _, row in f_is.iterrows():
                 with st.expander(f"[{row[0]}] {row[1]}"): st.write(row[2])
@@ -344,11 +338,10 @@ def main():
 
     with tabs[4]:
         if cur_financial:
-            stock = st.selectbox("종목 선택", list(cur_financial.keys()))
+            stock = st.selectbox("종목 선택", list(cur_financial.keys()), key="fin_stock_sel")
             df_fin = pd.DataFrame(cur_financial[stock])
-            vm = st.radio("보기 모드", ["연간", "분기"], horizontal=True)
+            vm = st.radio("보기 모드", ["연간", "분기"], horizontal=True, key="fin_view_mode")
             cols = df_fin.columns.tolist()
-            # React 코드의 로직 반영: 1~4열 연간, 5열~ 분기
             if vm == "연간": st.table(df_fin[[cols[0]] + cols[1:5]])
             else: st.table(df_fin[[cols[0]] + cols[5:]])
         else: st.info("데이터 없음")
