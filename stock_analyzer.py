@@ -26,6 +26,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+
 # --- 유틸리티 함수 ---
 def clean_price(val):
     if pd.isna(val): return 0.0
@@ -36,12 +37,14 @@ def clean_price(val):
     except:
         return 0.0
 
+
 def find_column(df, keywords):
     """주어진 키워드 중 하나를 포함하는 컬럼명을 찾음"""
     for col in df.columns:
         if any(key.lower() in str(col).lower() for key in keywords):
             return col
     return None
+
 
 def format_date_korean(date_val):
     """날짜를 'YYYY년 MM월 DD일' 형식으로 변환"""
@@ -50,7 +53,7 @@ def format_date_korean(date_val):
         if len(clean_date_str) == 8 and clean_date_str.isdigit():
             dt = datetime.strptime(clean_date_str, "%Y%m%d")
             return dt.strftime("%Y년 %m월 %d일")
-        
+
         dt = pd.to_datetime(date_val)
         if not pd.isna(dt):
             return dt.strftime("%Y년 %m월 %d일")
@@ -58,18 +61,19 @@ def format_date_korean(date_val):
     except:
         return str(date_val)
 
+
 # --- 샘플 데이터 (초기 로드용) ---
 def get_mock_data():
     dates = pd.date_range(end=datetime.now(), periods=200, freq='D')
     prices = 50000 + np.cumsum(np.random.normal(50, 200, 200))
     benchmarks = 2500 + np.cumsum(np.random.normal(2, 10, 200))
-    
+
     price_df = pd.DataFrame({
         'Date': dates,
         'Price': prices,
         'Benchmark': benchmarks
     })
-    
+
     constituents = pd.DataFrame([
         {'Name': '삼성전자', 'Weight': 25.73, '1Y': 98.7},
         {'Name': 'SK하이닉스', 'Weight': 16.75, '1Y': 228.87},
@@ -91,20 +95,42 @@ def get_mock_data():
 
     return price_df, constituents, basic_info
 
+
 # --- 메인 앱 로직 ---
 def main():
     st.title("📊 ETF 통합 분석 대시보드")
     st.caption("포트폴리오 성과, 분배금 현황, 구성종목 분석 리포트")
 
-    # --- 사이드바: 파일 업로드 섹션 ---
-    st.sidebar.header("📁 데이터 업로드")
-    
-    upload_basic = st.sidebar.file_uploader("1. 기본정보 (Excel/CSV)", type=['xlsx', 'csv'])
-    upload_price = st.sidebar.file_uploader("2. 주가 데이터 (Excel/CSV)", type=['xlsx', 'csv'])
-    upload_div = st.sidebar.file_uploader("3. 분배금 정보 (Excel/CSV)", type=['xlsx', 'csv'])
-    upload_const = st.sidebar.file_uploader("4. 구성종목/성과 (Excel/CSV)", type=['xlsx', 'csv'])
-    upload_issues = st.sidebar.file_uploader("5. 구성종목 이슈 (Excel/CSV)", type=['xlsx', 'csv'])
-    upload_financial = st.sidebar.file_uploader("6. 구성종목 재무데이터 (Excel)", type=['xlsx'])
+    # --- 사이드바: 관리자 인증 및 업로드 섹션 ---
+    st.sidebar.header("🔒 관리자 인증")
+    # 비밀번호 입력 (보안을 위해 텍스트가 가려짐)
+    admin_password = st.sidebar.text_input("비밀번호를 입력하세요", type="password", help="파일 업로드 권한을 얻기 위한 비밀번호입니다.")
+
+    # 비밀번호가 'admin1234'일 때만 업로드 UI 노출 (원하는 비밀번호로 변경 가능)
+    is_admin = admin_password == "admin1234"
+
+    upload_basic = None
+    upload_price = None
+    upload_div = None
+    upload_const = None
+    upload_issues = None
+    upload_financial = None
+
+    if is_admin:
+        st.sidebar.success("✅ 인증되었습니다.")
+        st.sidebar.markdown("---")
+        st.sidebar.header("📁 데이터 업로드")
+        upload_basic = st.sidebar.file_uploader("1. 기본정보 (Excel/CSV)", type=['xlsx', 'csv'])
+        upload_price = st.sidebar.file_uploader("2. 주가 데이터 (Excel/CSV)", type=['xlsx', 'csv'])
+        upload_div = st.sidebar.file_uploader("3. 분배금 정보 (Excel/CSV)", type=['xlsx', 'csv'])
+        upload_const = st.sidebar.file_uploader("4. 구성종목/성과 (Excel/CSV)", type=['xlsx', 'csv'])
+        upload_issues = st.sidebar.file_uploader("5. 구성종목 이슈 (Excel/CSV)", type=['xlsx', 'csv'])
+        upload_financial = st.sidebar.file_uploader("6. 구성종목 재무데이터 (Excel)", type=['xlsx'])
+    else:
+        if admin_password:
+            st.sidebar.error("❌ 비밀번호가 틀렸습니다.")
+        else:
+            st.sidebar.info("관리자 비밀번호를 입력하면 파일 업로드 기능이 나타납니다.")
 
     # --- 데이터 로드 ---
     price_mock, const_mock, basic_mock = get_mock_data()
@@ -112,10 +138,11 @@ def main():
     # 1. 기본 정보 처리
     if upload_basic:
         try:
-            df_basic_raw = pd.read_excel(upload_basic) if upload_basic.name.endswith('xlsx') else pd.read_csv(upload_basic)
+            df_basic_raw = pd.read_excel(upload_basic) if upload_basic.name.endswith('xlsx') else pd.read_csv(
+                upload_basic)
             if not df_basic_raw.empty:
                 row = df_basic_raw.iloc[0]
-                
+
                 def get_val_refined(df, row, keywords, col_idx, default):
                     col = find_column(df, keywords)
                     if col is not None:
@@ -151,12 +178,12 @@ def main():
         date_col = find_column(df_price, ['일자', '날짜', 'Date', 'date'])
         price_col = find_column(df_price, ['Price', '종가', 'Close'])
         bench_col = find_column(df_price, ['Benchmark', '벤치마크', 'Index'])
-        
+
         cols = df_price.columns
         if not date_col and len(cols) >= 1: date_col = cols[0]
         if not price_col and len(cols) >= 2: price_col = cols[1]
         if not bench_col and len(cols) >= 3: bench_col = cols[2]
-        
+
         if date_col: df_price = df_price.rename(columns={date_col: 'Date'})
         if price_col: df_price = df_price.rename(columns={price_col: 'Price'})
         if bench_col: df_price = df_price.rename(columns={bench_col: 'Benchmark'})
@@ -187,12 +214,12 @@ def main():
     with tab0:
         st.header(f"🏢 {basic_info['종목명']}")
         st.markdown("---")
-        
+
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("기초지수", basic_info["기초지수"])
-        c2.metric("시가총액", f"{basic_info['시가총액']/100000000:,.0f} 억원")
+        c2.metric("시가총액", f"{basic_info['시가총액'] / 100000000:,.0f} 억원")
         c3.metric("총보수(연)", f"{basic_info['총보수']:.3f}%")
-        
+
         formatted_listing_date = format_date_korean(basic_info["상장일"])
         c4.metric("상장일", formatted_listing_date)
         c5.metric("운용사", basic_info["운용사"])
@@ -223,18 +250,24 @@ def main():
                 horizontal=True,
                 key="perf_range"
             )
-            
+
             # 데이터 필터링
             last_date = df_price['Date'].max()
-            if time_range == "1주": start_date = last_date - timedelta(weeks=1)
-            elif time_range == "1개월": start_date = last_date - timedelta(days=30)
-            elif time_range == "3개월": start_date = last_date - timedelta(days=90)
-            elif time_range == "6개월": start_date = last_date - timedelta(days=180)
-            elif time_range == "1년": start_date = last_date - timedelta(days=365)
-            else: start_date = df_price['Date'].min()
-            
+            if time_range == "1주":
+                start_date = last_date - timedelta(weeks=1)
+            elif time_range == "1개월":
+                start_date = last_date - timedelta(days=30)
+            elif time_range == "3개월":
+                start_date = last_date - timedelta(days=90)
+            elif time_range == "6개월":
+                start_date = last_date - timedelta(days=180)
+            elif time_range == "1년":
+                start_date = last_date - timedelta(days=365)
+            else:
+                start_date = df_price['Date'].min()
+
             filtered_df = df_price[df_price['Date'] >= start_date].copy()
-            
+
             if not filtered_df.empty:
                 # 2. 지표 계산
                 latest_p = df_price.iloc[-1]['Price']
@@ -248,10 +281,10 @@ def main():
                 start_price = clean_price(filtered_df.iloc[0]['Price'])
                 end_price = clean_price(filtered_df.iloc[-1]['Price'])
                 period_return = ((end_price - start_price) / start_price) * 100
-                
+
                 filtered_df['Daily_Return'] = filtered_df['Price'].pct_change()
                 volatility = filtered_df['Daily_Return'].std() * np.sqrt(252) * 100
-                
+
                 bm_return = None
                 if 'Benchmark' in filtered_df.columns:
                     filtered_df['Benchmark'] = filtered_df['Benchmark'].apply(clean_price)
@@ -262,7 +295,7 @@ def main():
 
                 # --- 지표 레이아웃 개선 ---
                 st.markdown("### 📊 주요 성과 지표")
-                
+
                 # 첫 번째 줄: 가격 관련 지표
                 price_container = st.container()
                 with price_container:
@@ -273,7 +306,7 @@ def main():
                         st.metric(f"기간 내 최고가", f"{period_max:,.0f}원")
                     with c3:
                         st.metric(f"기간 내 최저가", f"{period_min:,.0f}원")
-                
+
                 # 두 번째 줄: 수익률 및 리스크 지표
                 perf_container = st.container()
                 with perf_container:
@@ -287,27 +320,27 @@ def main():
                             st.metric("벤치마크 수익률", f"{bm_return:.2f}%", f"{period_return - bm_return:+.2f}%p")
                         else:
                             st.metric("벤치마크", "데이터 없음")
-                
+
                 st.markdown("---")
 
                 # 3. 차트 생성
                 filtered_df['ETF_Ret_Chart'] = (filtered_df['Price'] - start_price) / start_price * 100
-                
+
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
-                    x=filtered_df['Date'], y=filtered_df['ETF_Ret_Chart'], name='ETF 수익률', 
+                    x=filtered_df['Date'], y=filtered_df['ETF_Ret_Chart'], name='ETF 수익률',
                     line=dict(color='#ef4444', width=3),
                     hovertemplate='ETF: %{y:.2f}%<extra></extra>'
                 ))
-                
+
                 if bm_return is not None:
                     filtered_df['BM_Ret_Chart'] = (filtered_df['Benchmark'] - start_bm) / start_bm * 100
                     fig.add_trace(go.Scatter(
-                        x=filtered_df['Date'], y=filtered_df['BM_Ret_Chart'], name='벤치마크 (BM)', 
+                        x=filtered_df['Date'], y=filtered_df['BM_Ret_Chart'], name='벤치마크 (BM)',
                         line=dict(color='#4b5563', width=2, dash='dot'),
                         hovertemplate='BM: %{y:.2f}%<extra></extra>'
                     ))
-                
+
                 fig.update_layout(
                     template="plotly_white", hovermode="x unified",
                     yaxis_title="누적 수익률 (%)",
@@ -333,8 +366,9 @@ def main():
                 df_div = pd.read_excel(upload_div) if upload_div.name.endswith('xlsx') else pd.read_csv(upload_div)
             else:
                 df_div = pd.DataFrame({'날짜': ['24-01', '24-04', '24-07', '24-10'], '분배금': [100, 450, 150, 120]})
-            
-            fig_div = px.bar(df_div, x=df_div.columns[0], y=df_div.columns[1], text_auto=',.0f', color_discrete_sequence=['#3b82f6'])
+
+            fig_div = px.bar(df_div, x=df_div.columns[0], y=df_div.columns[1], text_auto=',.0f',
+                             color_discrete_sequence=['#3b82f6'])
             fig_div.update_layout(
                 template="plotly_white",
                 height=450,
@@ -350,7 +384,7 @@ def main():
                 df_const['Weight'] = df_const['Weight'].apply(clean_price)
                 top_10 = df_const.sort_values(by='Weight', ascending=False).head(10)
                 fig_pie = px.pie(top_10, names='Name', values='Weight', hole=0.4,
-                                color_discrete_sequence=px.colors.qualitative.T10)
+                                 color_discrete_sequence=px.colors.qualitative.T10)
                 fig_pie.update_layout(
                     template="plotly_white",
                     height=450,
@@ -384,11 +418,13 @@ def main():
             st.info("재무데이터(다중 시트 엑셀)를 업로드해주세요.")
 
     # --- 데이터 다운로드 섹션 ---
+    # 데이터 내보내기도 관리자일 때만 보이도록 설정 가능 (여기서는 누구나 가능하게 유지)
     st.sidebar.markdown("---")
     st.sidebar.subheader("📥 데이터 내보내기")
     if st.sidebar.button("분석 리포트 CSV 생성"):
         csv = df_price.to_csv(index=False).encode('utf-8-sig')
         st.sidebar.download_button("CSV 다운로드", data=csv, file_name="etf_report.csv", mime="text/csv")
+
 
 if __name__ == "__main__":
     main()
