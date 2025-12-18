@@ -77,9 +77,14 @@ st.markdown("""
 
 # --- Firebase / Firestore 설정 (Secrets 대응) ---
 def get_clean_app_id():
-    # Secrets에 설정된 "stock_analyzer" 가져오기
-    val = st.secrets.get("app_id", "stock_analyzer")
-    return str(val).strip() if val else "stock_analyzer"
+    # Secrets에서 값을 가져오되, 없거나 비어있으면 기본값 반환
+    try:
+        val = st.secrets.get("app_id")
+        if val and str(val).strip():
+            return str(val).strip()
+    except:
+        pass
+    return "stock_analyzer"
 
 app_id = get_clean_app_id()
 firebase_config_raw = st.secrets.get("firebase_config")
@@ -128,24 +133,40 @@ def format_date_korean(date_val):
         return dt.strftime("%Y년 %m월 %d일") if not pd.isna(dt) else str(date_val)
     except: return str(date_val)
 
-# --- 클라우드 저장 및 로드 ---
+# --- 클라우드 저장 및 로드 (경로 검증 강화) ---
 def save_to_cloud(payload):
     if not db: 
         st.error("데이터베이스 연결 설정이 필요합니다.")
         return
-    try:
-        # 경로 구성 요소 강제 문자열화 및 검증
-        safe_app_id = str(app_id).strip()
-        if not safe_app_id: 
-            st.error("app_id가 비어있습니다.")
+    
+    # 1. App ID 최종 검증
+    safe_app_id = str(app_id).strip()
+    if not safe_app_id: 
+        safe_app_id = "stock_analyzer"
+    
+    # 2. 경로 구성 요소 확인
+    path_components = {
+        "collection1": "artifacts",
+        "doc1": safe_app_id,
+        "collection2": "public",
+        "doc2": "data",
+        "collection3": "dashboard",
+        "doc3": "latest"
+    }
+    
+    # 빈 컴포넌트가 있는지 확인
+    for k, v in path_components.items():
+        if not v or not str(v).strip():
+            st.error(f"저장 경로 생성 실패: '{k}' 요소가 비어있습니다. (값: {v})")
             return
-            
-        # artifacts(coll) -> appId(doc) -> public(coll) -> data(doc) -> dashboard(coll) -> latest(doc)
+
+    try:
+        # artifacts/{appId}/public/data/dashboard/latest
         doc_ref = db.collection("artifacts").document(safe_app_id)\
                     .collection("public").document("data")\
                     .collection("dashboard").document("latest")
         doc_ref.set(payload)
-        st.success("☁️ 클라우드에 최신 데이터가 성공적으로 저장되었습니다.")
+        st.success(f"☁️ 클라우드 저장 완료! (ID: {safe_app_id})")
     except Exception as e:
         st.error(f"저장 중 오류가 발생했습니다: {e}")
 
@@ -153,6 +174,8 @@ def load_from_cloud():
     if not db: return None
     try:
         safe_app_id = str(app_id).strip()
+        if not safe_app_id: safe_app_id = "stock_analyzer"
+        
         doc_ref = db.collection("artifacts").document(safe_app_id)\
                     .collection("public").document("data")\
                     .collection("dashboard").document("latest")
