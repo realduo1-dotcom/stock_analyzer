@@ -5,6 +5,7 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import numpy as np
 import json
+import io
 
 # Firestore 라이브러리 임포트 에러 방지를 위한 처리
 try:
@@ -31,7 +32,6 @@ def get_db():
         if firebase_config_str:
             config_dict = json.loads(firebase_config_str)
             creds = service_account.Credentials.from_service_account_info(config_dict)
-            # project_id 명시적 할당
             client = firestore.Client(credentials=creds, project=config_dict.get("project_id"))
             return client
         return None
@@ -73,7 +73,6 @@ def save_to_cloud(payload):
         st.error("DB가 연결되지 않았습니다. 설정을 확인해주세요.")
         return
     try:
-        # 경로: /artifacts/{appId}/public/data/dashboard/latest
         doc_ref = db.collection("artifacts").document(app_id).collection("public").document("data").collection("dashboard").document("latest")
         doc_ref.set(payload)
         st.success("☁️ 클라우드 저장 완료!")
@@ -119,13 +118,22 @@ def main():
     cloud_data = load_from_cloud()
     price_mock, const_mock, basic_mock = get_mock_data()
     
+    # 데이터 파싱 함수 (ValueError 방지)
+    def parse_df(json_str, fallback_df):
+        if not json_str or not isinstance(json_str, str):
+            return fallback_df
+        try:
+            return pd.read_json(io.StringIO(json_str))
+        except:
+            return fallback_df
+
     if cloud_data:
         st.sidebar.info("📡 클라우드 동기화 완료")
         current_basic = cloud_data.get('basic_info', basic_mock)
-        current_price = pd.read_json(cloud_data['price_df']) if 'price_df' in cloud_data else price_mock
-        current_const = pd.read_json(cloud_data['const_df']) if 'const_df' in cloud_data else const_mock
-        current_div = pd.read_json(cloud_data['div_df']) if 'div_df' in cloud_data else None
-        current_issues = pd.read_json(cloud_data['issues_df']) if 'issues_df' in cloud_data else None
+        current_price = parse_df(cloud_data.get('price_df'), price_mock)
+        current_const = parse_df(cloud_data.get('const_df'), const_mock)
+        current_div = parse_df(cloud_data.get('div_df'), None)
+        current_issues = parse_df(cloud_data.get('issues_df'), None)
         current_financial = cloud_data.get('financial_data', {})
     else:
         current_basic, current_price, current_const = basic_mock, price_mock, const_mock
@@ -204,8 +212,24 @@ def main():
                 current_price[d_col] = pd.to_datetime(current_price[d_col])
                 current_price = current_price.sort_values(d_col)
                 time_range = st.radio("기간", ["1주", "1개월", "3개월", "6개월", "1년", "전체"], index=5, horizontal=True)
-                # ... (필터링 및 차트 코드 기존 동일)
-                st.plotly_chart(px.line(current_price, x=d_col, y=p_col), use_container_width=True)
+                
+                # 기간 필터링
+                last_date = current_price[d_col].max()
+                if time_range == "1주": start_date = last_date - timedelta(weeks=1)
+                elif time_range == "1개월": start_date = last_date - timedelta(days=30)
+                elif time_range == "3개월": start_date = last_date - timedelta(days=90)
+                elif time_range == "6개월": start_date = last_date - timedelta(days=180)
+                elif time_range == "1년": start_date = last_date - timedelta(days=365)
+                else: start_date = current_price[d_col].min()
+                
+                filtered_df = current_price[current_price[d_col] >= start_date].copy()
+                
+                if not filtered_df.empty:
+                    fig = px.line(filtered_df, x=d_col, y=p_col, title=f"주가 추이 ({time_range})")
+                    fig.update_xaxes(tickformat="%Y년 %m월")
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("선택한 기간에 데이터가 없습니다.")
             else:
                 st.warning("데이터 컬럼 형식이 맞지 않습니다.")
 
@@ -213,21 +237,29 @@ def main():
         c_bar, c_pie = st.columns(2)
         with c_bar:
             st.subheader("분배금")
-            if current_div is not None: st.bar_chart(current_div)
+            if current_div is not None and not current_div.empty: 
+                st.bar_chart(current_div)
+            else:
+                st.info("표시할 분배금 데이터가 없습니다.")
         with c_pie:
             st.subheader("구성종목")
-            if isinstance(current_const, pd.DataFrame):
+            if isinstance(current_const, pd.DataFrame) and not current_const.empty:
                 st.plotly_chart(px.pie(current_const.head(10), names=current_const.columns[0], values=current_const.columns[1], hole=0.4), use_container_width=True)
+            else:
+                st.info("표시할 구성종목 데이터가 없습니다.")
 
     with tabs[3]:
-        if current_issues is not None: st.table(current_issues)
-        else: st.info("데이터 없음")
+        if current_issues is not None and not current_issues.empty: 
+            st.table(current_issues)
+        else: 
+            st.info("등록된 이슈 데이터가 없습니다.")
 
     with tabs[4]:
         if current_financial:
             stock = st.selectbox("종목 선택", list(current_financial.keys()))
             st.table(pd.DataFrame(current_financial[stock]))
-        else: st.info("데이터 없음")
+        else: 
+            st.info("재무 데이터가 없습니다.")
 
 if __name__ == "__main__":
     main()
