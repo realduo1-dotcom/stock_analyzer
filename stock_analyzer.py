@@ -80,9 +80,11 @@ def get_clean_app_id():
     # Secrets에서 값을 가져오되, 없거나 비어있으면 기본값 반환
     try:
         val = st.secrets.get("app_id")
-        if val and str(val).strip():
-            # 슬래시 제거 (경로 오류 방지)
-            return str(val).strip().replace("/", "")
+        if val:
+            # 문자열로 변환 후 양끝 공백 제거 및 내부 슬래시 제거
+            s_val = str(val).strip().replace("/", "")
+            if s_val:
+                return s_val
     except:
         pass
     return "stock_analyzer"
@@ -134,27 +136,27 @@ def format_date_korean(date_val):
         return dt.strftime("%Y년 %m월 %d일") if not pd.isna(dt) else str(date_val)
     except: return str(date_val)
 
-# --- 클라우드 저장 및 로드 (경로 검증 강화) ---
+# --- 클라우드 저장 및 로드 (경로 에러 해결을 위한 구조 변경) ---
 def save_to_cloud(payload):
     if not db: 
         st.error("데이터베이스 연결 설정이 필요합니다.")
         return
     
-    # 1. App ID 최종 검증
+    # App ID 재검증
     safe_app_id = str(app_id).strip()
-    if not safe_app_id: 
-        safe_app_id = "stock_analyzer"
-    
-    # 2. 경로 문자열 생성 (명시적)
-    doc_path = f"artifacts/{safe_app_id}/public/data/dashboard/latest"
+    if not safe_app_id: safe_app_id = "stock_analyzer"
     
     try:
-        # 단일 document() 호출로 경로 모호성 제거
-        doc_ref = db.document(doc_path)
+        # 경로를 명시적 문자열로 구성하되, 슬래시 중복 방지 및 컴포넌트 방식 혼합
+        # db.collection().document() 방식을 사용하여 'One or more components is empty' 에러 원천 차단
+        doc_ref = db.collection("artifacts").document(safe_app_id)\
+                    .collection("public").document("data")\
+                    .collection("dashboard").document("latest")
+        
         doc_ref.set(payload)
         st.success(f"☁️ 클라우드 저장 완료! (ID: {safe_app_id})")
     except Exception as e:
-        st.error(f"저장 실패.\n경로: {doc_path}\n에러: {e}")
+        st.error(f"저장 실패. (ID: {safe_app_id})\n에러 상세: {e}")
 
 def load_from_cloud():
     if not db: return None
@@ -162,8 +164,10 @@ def load_from_cloud():
         safe_app_id = str(app_id).strip()
         if not safe_app_id: safe_app_id = "stock_analyzer"
         
-        doc_path = f"artifacts/{safe_app_id}/public/data/dashboard/latest"
-        doc_ref = db.document(doc_path)
+        # 저장할 때와 동일한 안전한 컴포넌트 방식 사용
+        doc_ref = db.collection("artifacts").document(safe_app_id)\
+                    .collection("public").document("data")\
+                    .collection("dashboard").document("latest")
         
         doc = doc_ref.get()
         return doc.to_dict() if doc.exists else None
