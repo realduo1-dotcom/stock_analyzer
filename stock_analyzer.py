@@ -5,32 +5,42 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import numpy as np
 import json
-from google.cloud import firestore
-from google.oauth2 import service_account
+
+# Firestore 라이브러리 임포트 에러 방지를 위한 처리
+try:
+    from google.cloud import firestore
+    from google.oauth2 import service_account
+    FIRESTORE_AVAILABLE = True
+except ImportError:
+    FIRESTORE_AVAILABLE = False
 
 # --- 페이지 설정 ---
 st.set_page_config(page_title="ETF 통합 대시보드", layout="wide")
 
-# --- Firebase / Firestore 설정 (Mandatory Rules 적용) ---
-# Streamlit Secrets에서 설정 가져오기
+# --- Firebase / Firestore 설정 ---
 app_id = st.secrets.get("app_id", "default-app-id")
 firebase_config_str = st.secrets.get("firebase_config")
 
 @st.cache_resource
 def get_db():
     """Firestore 클라이언트 초기화 및 캐싱"""
+    if not FIRESTORE_AVAILABLE:
+        return None
     try:
         if firebase_config_str:
-            # JSON 문자열을 딕셔너리로 변환
             config_dict = json.loads(firebase_config_str)
             creds = service_account.Credentials.from_service_account_info(config_dict)
             return firestore.Client(credentials=creds, project=config_dict.get("project_id"))
         return None
     except Exception as e:
-        st.sidebar.error(f"DB 연결 실패: {e}")
+        st.sidebar.error(f"DB 연결 설정 오류: {e}")
         return None
 
 db = get_db()
+
+# --- 라이브러리 누락 안내 ---
+if not FIRESTORE_AVAILABLE:
+    st.error("⚠️ 'google-cloud-firestore' 라이브러리가 설치되지 않았습니다. 'pip install google-cloud-firestore' 명령어로 설치하거나 requirements.txt에 추가해주세요.")
 
 # --- 커스텀 CSS ---
 st.markdown("""
@@ -62,14 +72,12 @@ def format_date_korean(date_val):
         return dt.strftime("%Y년 %m월 %d일") if not pd.isna(dt) else str(date_val)
     except: return str(date_val)
 
-# --- Firestore 데이터 연동 함수 (RULE 1 & 2 적용) ---
+# --- Firestore 데이터 연동 함수 ---
 def save_to_cloud(payload):
     if not db:
-        st.error("DB 설정이 되어있지 않습니다. Secrets를 확인해주세요.")
+        st.error("DB 설정이 되어있지 않습니다. Secrets와 라이브러리 설치 여부를 확인해주세요.")
         return
     try:
-        # RULE 1: artifacts/{appId}/public/data/{collectionName}
-        # 여기서는 단일 문서 'latest'에 모든 상태를 저장하여 복잡한 쿼리를 방지(RULE 2)
         doc_ref = db.collection("artifacts").document(app_id).collection("public").document("data")
         doc_ref.set(payload)
         st.success("☁️ 클라우드 저장 완료! 모든 사용자가 이 데이터를 보게 됩니다.")
@@ -104,9 +112,7 @@ def main():
     st.title("📊 ETF 통합 분석 대시보드")
     
     # 1. 초기 데이터 로드 (클라우드 우선)
-    with st.spinner("데이터 동기화 중..."):
-        cloud_data = load_from_cloud()
-    
+    cloud_data = load_from_cloud()
     price_mock, const_mock, basic_mock = get_mock_data()
     
     if cloud_data:
@@ -189,7 +195,6 @@ def main():
 
     with tab1:
         if isinstance(current_price, pd.DataFrame) and not current_price.empty:
-            # 주가 데이터 컬럼명 표준화
             d_col = find_column(current_price, ['일자', '날짜', 'Date'])
             p_col = find_column(current_price, ['Price', '종가'])
             if d_col and p_col:
@@ -199,9 +204,29 @@ def main():
                 # 기간 선택 및 지표 계산
                 time_range = st.radio("기간", ["1주", "1개월", "3개월", "6개월", "1년", "전체"], index=5, horizontal=True)
                 
-                # 필터링 로직 (생략 - 기존과 동일)
-                # 차트 렌더링
-                fig = px.line(current_price, x=d_col, y=p_col, title="주가 추이")
+                last_date = current_price[d_col].max()
+                if time_range == "1주": start_date = last_date - timedelta(weeks=1)
+                elif time_range == "1개월": start_date = last_date - timedelta(days=30)
+                elif time_range == "3개월": start_date = last_date - timedelta(days=90)
+                elif time_range == "6개월": start_date = last_date - timedelta(days=180)
+                elif time_range == "1년": start_date = last_date - timedelta(days=365)
+                else: start_date = current_price[d_col].min()
+                
+                filtered_df = current_price[current_price[d_col] >= start_date].copy()
+                
+                # 지표 요약 카드
+                st.markdown("### 📊 조회 기간 지표")
+                l1, l2, l3 = st.columns(3)
+                start_p = filtered_df[p_col].iloc[0]
+                end_p = filtered_df[p_col].iloc[-1]
+                ret = (end_p - start_p) / start_p * 100
+                
+                l1.metric("기간 수익률", f"{ret:.2f}%")
+                l2.metric("최고가", f"{filtered_df[p_col].max():,.0f}원")
+                l3.metric("최저가", f"{filtered_df[p_col].min():,.0f}원")
+                
+                fig = px.line(filtered_df, x=d_col, y=p_col, title=f"주가 추이 ({time_range})")
+                fig.update_xaxes(tickformat="%Y년 %m월")
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.warning("주가 데이터의 컬럼 형식이 맞지 않습니다.")
