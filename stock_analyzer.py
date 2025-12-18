@@ -74,8 +74,26 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- Firebase / Firestore 설정 ---
-raw_app_id = st.secrets.get("app_id", "default-app-id")
-app_id = raw_app_id if raw_app_id and str(raw_app_id).strip() != "" else "default-app-id"
+# appId가 유효하지 않을 경우를 대비해 더 엄격한 체크 추가
+def get_valid_app_id():
+    # 1. Secrets에서 가져오기
+    val = st.secrets.get("app_id")
+    if val and str(val).strip():
+        return str(val).strip()
+    
+    # 2. 전역 변수(환경변수) 확인
+    try:
+        import os
+        env_val = os.environ.get("__app_id")
+        if env_val and str(env_val).strip():
+            return str(env_val).strip()
+    except:
+        pass
+        
+    # 3. 기본값 반환
+    return "default-app-id"
+
+app_id = get_valid_app_id()
 firebase_config_str = st.secrets.get("firebase_config")
 
 @st.cache_resource
@@ -113,22 +131,39 @@ def format_date_korean(date_val):
         return dt.strftime("%Y년 %m월 %d일") if not pd.isna(dt) else str(date_val)
     except: return str(date_val)
 
-# --- 클라우드 연동 ---
+# --- 클라우드 연동 (경로 검증 로직 추가) ---
 def save_to_cloud(payload):
-    if not db: return
+    if not db: 
+        st.error("데이터베이스가 연결되지 않았습니다. 설정을 확인해주세요.")
+        return
+    
+    # 경로 구성 요소 중 하나라도 비어있는지 사전에 체크
+    path_components = ["artifacts", app_id, "public", "data", "dashboard", "latest"]
+    if any(not str(c).strip() for c in path_components):
+        st.error(f"저장 경로가 유효하지 않습니다. (app_id: '{app_id}')")
+        return
+
     try:
+        # RULE 1 경로 준수
         doc_ref = db.collection("artifacts").document(app_id).collection("public").document("data").collection("dashboard").document("latest")
         doc_ref.set(payload)
         st.success("☁️ 클라우드 저장 완료!")
-    except Exception as e: st.error(f"저장 오류: {e}")
+    except Exception as e: 
+        st.error(f"저장 오류: {e}")
 
 def load_from_cloud():
     if not db: return None
+    
+    path_components = ["artifacts", app_id, "public", "data", "dashboard", "latest"]
+    if any(not str(c).strip() for c in path_components):
+        return None
+
     try:
         doc_ref = db.collection("artifacts").document(app_id).collection("public").document("data").collection("dashboard").document("latest")
         doc = doc_ref.get()
         return doc.to_dict() if doc.exists else None
-    except: return None
+    except: 
+        return None
 
 # --- 샘플 데이터 (초기 로드용) ---
 def get_mock_data():
@@ -290,34 +325,29 @@ def main():
                 current_price[d_col] = pd.to_datetime(current_price[d_col])
                 current_price = current_price.sort_values(d_col)
                 
-                # 기간 선택 및 성과 지표
                 tr = st.radio("기간", ["1주", "1개월", "3개월", "6개월", "1년", "전체"], index=5, horizontal=True)
                 
                 last_date = current_price[d_col].max()
                 delta = {"1주": 7, "1개월": 30, "3개월": 90, "6개월": 180, "1년": 365}.get(tr, 9999)
                 filtered_df = current_price[current_price[d_col] >= (last_date - timedelta(days=delta))].copy()
                 
-                start_p = filtered_df[p_col].iloc[0]
-                end_p = filtered_df[p_col].iloc[-1]
-                ret = (end_p - start_p) / start_p * 100
+                if not filtered_df.empty:
+                    start_p = filtered_df[p_col].iloc[0]
+                    filtered_df['ETF_Ret'] = (filtered_df[p_col] - start_p) / start_p * 100
+                    
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=filtered_df[d_col], y=filtered_df['ETF_Ret'], name='ETF 수익률', line=dict(color='#ef4444', width=3)))
+                    
+                    if b_col:
+                        start_b = filtered_df[b_col].iloc[0]
+                        filtered_df['BM_Ret'] = (filtered_df[b_col] - start_b) / start_b * 100
+                        fig.add_trace(go.Scatter(x=filtered_df[d_col], y=filtered_df['BM_Ret'], name='벤치마크', line=dict(color='#94a3b8', width=2, dash='dot')))
+                    
+                    fig.update_layout(template="plotly_white", hovermode="x unified", height=500, yaxis_title="수익률 (%)",
+                                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                    
+                    st.plotly_chart(fig, use_container_width=True)
                 
-                # 차트 데이터 정규화
-                filtered_df['ETF_Ret'] = (filtered_df[p_col] - start_p) / start_p * 100
-                
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=filtered_df[d_col], y=filtered_df['ETF_Ret'], name='ETF 수익률', line=dict(color='#ef4444', width=3)))
-                
-                if b_col:
-                    start_b = filtered_df[b_col].iloc[0]
-                    filtered_df['BM_Ret'] = (filtered_df[b_col] - start_b) / start_b * 100
-                    fig.add_trace(go.Scatter(x=filtered_df[d_col], y=filtered_df['BM_Ret'], name='벤치마크', line=dict(color='#94a3b8', width=2, dash='dot')))
-                
-                fig.update_layout(template="plotly_white", hovermode="x unified", height=500, yaxis_title="수익률 (%)",
-                                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-                
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # 기간별 성과 테이블 (TOP 10)
                 st.markdown("#### 📊 구성종목 기간 성과 (Top 10)")
                 if isinstance(current_const, pd.DataFrame):
                     st.dataframe(current_const.head(10), use_container_width=True)
@@ -355,21 +385,15 @@ def main():
         if current_financial:
             stock = st.selectbox("재무정보 종목 선택", list(current_financial.keys()))
             df_fin = pd.DataFrame(current_financial[stock])
-            
-            # 자바스크립트 코드의 연간/분기별 분리 로직 반영
             st.markdown(f"### 🏢 {stock} 재무제표")
             view_mode = st.radio("보기 모드", ["연간", "분기"], horizontal=True)
-            
-            # 첫 4개 데이터 열을 연간, 나머지를 분기로 간주하는 로직
             cols = df_fin.columns.tolist()
             label_col = cols[0]
             data_cols = cols[1:]
-            
             if view_mode == "연간":
                 display_cols = [label_col] + data_cols[:4]
             else:
                 display_cols = [label_col] + data_cols[4:]
-                
             st.table(df_fin[display_cols])
         else: st.info("재무 데이터가 없습니다.")
 
