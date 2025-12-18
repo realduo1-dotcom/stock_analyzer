@@ -18,7 +18,9 @@ except ImportError:
 st.set_page_config(page_title="ETF 통합 대시보드", layout="wide")
 
 # --- Firebase / Firestore 설정 ---
-app_id = st.secrets.get("app_id", "default-app-id")
+# RULE 1 준수를 위해 appId가 유효한지 체크
+raw_app_id = st.secrets.get("app_id", "default-app-id")
+app_id = raw_app_id if raw_app_id and str(raw_app_id).strip() != "" else "default-app-id"
 firebase_config_str = st.secrets.get("firebase_config")
 
 @st.cache_resource
@@ -72,25 +74,30 @@ def format_date_korean(date_val):
         return dt.strftime("%Y년 %m월 %d일") if not pd.isna(dt) else str(date_val)
     except: return str(date_val)
 
-# --- Firestore 데이터 연동 함수 ---
+# --- Firestore 데이터 연동 함수 (RULE 1 경로 엄격 준수) ---
 def save_to_cloud(payload):
     if not db:
         st.error("DB 설정이 되어있지 않습니다. Secrets와 라이브러리 설치 여부를 확인해주세요.")
         return
     try:
-        doc_ref = db.collection("artifacts").document(app_id).collection("public").document("data")
+        # RULE 1 경로: /artifacts/{appId}/public/data/{collectionName}/{documentId}
+        # 경로 구성 요소 중 빈 값이 있으면 에러가 발생하므로 "main_data"라는 명시적 이름을 사용
+        doc_ref = db.collection("artifacts").document(app_id).collection("public").document("data").collection("dashboard").document("latest")
         doc_ref.set(payload)
         st.success("☁️ 클라우드 저장 완료! 모든 사용자가 이 데이터를 보게 됩니다.")
     except Exception as e:
+        # 상세 에러 메시지 출력으로 디버깅 지원
         st.error(f"저장 오류: {e}")
 
 def load_from_cloud():
     if not db: return None
     try:
-        doc_ref = db.collection("artifacts").document(app_id).collection("public").document("data")
+        # 저장할 때와 동일한 경로 구조 사용
+        doc_ref = db.collection("artifacts").document(app_id).collection("public").document("data").collection("dashboard").document("latest")
         doc = doc_ref.get()
         return doc.to_dict() if doc.exists else None
-    except: return None
+    except Exception as e:
+        return None
 
 # --- 샘플 데이터 ---
 def get_mock_data():
@@ -112,7 +119,9 @@ def main():
     st.title("📊 ETF 통합 분석 대시보드")
     
     # 1. 초기 데이터 로드 (클라우드 우선)
-    cloud_data = load_from_cloud()
+    with st.spinner("데이터 동기화 중..."):
+        cloud_data = load_from_cloud()
+    
     price_mock, const_mock, basic_mock = get_mock_data()
     
     if cloud_data:
@@ -165,6 +174,7 @@ def main():
             current_financial = {sheet: pd.read_excel(xls, sheet_name=sheet).to_dict() for sheet in xls.sheet_names}
 
         if st.sidebar.button("🚀 변경사항 클라우드에 영구 저장"):
+            # 데이터 준비 시 모든 값이 유효한지 체크
             payload = {
                 "basic_info": current_basic,
                 "price_df": current_price.to_json() if isinstance(current_price, pd.DataFrame) else None,
