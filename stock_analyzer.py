@@ -237,8 +237,16 @@ def main():
         c_bar, c_pie = st.columns(2)
         with c_bar:
             st.subheader("분배금")
-            if current_div is not None and not current_div.empty: 
-                st.bar_chart(current_div)
+            if isinstance(current_div, pd.DataFrame) and not current_div.empty: 
+                # st.bar_chart 대신 Plotly Express 사용 (안정성 강화)
+                fig_div = px.bar(
+                    current_div, 
+                    x=current_div.columns[0], 
+                    y=current_div.columns[1],
+                    title="분배금 현황",
+                    labels={current_div.columns[0]: "지급일", current_div.columns[1]: "분배금(원)"}
+                )
+                st.plotly_chart(fig_div, use_container_width=True)
             else:
                 st.info("표시할 분배금 데이터가 없습니다.")
         with c_pie:
